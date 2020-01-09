@@ -20,6 +20,9 @@ class CurlClient
     const HTTP_ERROR = 500;
 
     const RATE_LIMIT_RESET = "x-rate-limit-reset";
+    const RATE_LIMIT = "x-rate-limit";
+    const RATE_LIMIT_REMAINING = "x-rate-limit-remaining";
+    const DEFAULT_RATE_LIMIT = 180;
 
     /**
      * @var array of headers sent with HTTP requests
@@ -27,13 +30,24 @@ class CurlClient
     private $_requestHeaders = array();
 
     /**
+     * @var array of headers received with HTTP responses
+     */
+    private $_responseHeaders = array();
+
+    /**
+     * @var bool keep the request rate below the API rate limit
+     */
+    private $_keepBelowRateLimit;
+
+    /**
      * @var int the last HTTP status code received
      */
     private $_lastStatusCode;
 
-    public function __construct($apiKey = "", $siteID = "")
+    public function __construct($apiKey = "", $siteID = "", $keepBelowRateLimit = true)
     {
         $this->setCredentials($apiKey, $siteID);
+        $this->_keepBelowRateLimit = $keepBelowRateLimit;
     }
 
     /**
@@ -180,6 +194,11 @@ class CurlClient
             return false;
         }
 
+        if ($this->_keepBelowRateLimit)
+        {
+            $this->_checkRateLimit();
+        }
+
         if ($options &&
             is_array($options) &&
             array_key_exists("headers", $options) &&
@@ -259,6 +278,8 @@ class CurlClient
 
         $result = curl_exec($curlHandle);
 
+        $this->_responseHeaders = $headers;
+
         $this->_lastStatusCode = curl_getinfo($curlHandle, CURLINFO_HTTP_CODE);
         if ($this->_lastStatusCode == self::HTTP_RATE_LIMIT)
         {
@@ -305,5 +326,44 @@ class CurlClient
         $result = curl_exec($curlHandle);
         $this->_lastStatusCode = curl_getinfo($curlHandle, CURLINFO_HTTP_CODE);
         return $result;
+    }
+
+    private function _checkRateLimit()
+    {
+        // If no API calls have been made, no need to delay.
+        if (empty($this->_responseHeaders))
+        {
+            return;
+        }
+
+        // Default the $limit and $remaining values if not set in the last response header.
+        /** @var int $limit */
+        $limit = isset($this->_responseHeaders[self::RATE_LIMIT])
+                    ? (int)$this->_responseHeaders[self::RATE_LIMIT]
+                    : self::DEFAULT_RATE_LIMIT;
+
+        /** @var int $remaining */
+        $remaining = isset($this->_responseHeaders[self::RATE_LIMIT_REMAINING])
+                        ? (int)$this->_responseHeaders[self::RATE_LIMIT_REMAINING]
+                        : self::DEFAULT_RATE_LIMIT;
+
+        // If no API calls have been made, no need to delay.
+        if ($limit == $remaining)
+        {
+            return;
+        }
+
+        // If we are below 5% remaining, sleep for 0.50 seconds.
+        if ($remaining / $limit < 0.05)
+        {
+            usleep(500000);
+            return;
+        }
+
+        // If we are below 10% remaining, sleep for 0.25 seconds.
+        if ($remaining / $limit < 0.1)
+        {
+            usleep(250000);
+        }
     }
 }
