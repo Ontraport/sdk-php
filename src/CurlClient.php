@@ -285,7 +285,8 @@ class CurlClient
                 return $len;
             }
         );
-        curl_setopt($curlHandle, CURLOPT_TIMEOUT, 60);
+        curl_setopt($curlHandle, CURLOPT_CONNECTTIMEOUT, 30);
+        curl_setopt($curlHandle, CURLOPT_TIMEOUT, 60 * 2);
 
         /** ********** DEBUGGER ********** */
         if ($this->_debug) {
